@@ -1,0 +1,6 @@
+# Blynk credentials
+HomeAutomation/secrets.h
+
+# NAS logger output / Python cache
+logs/
+__pycache__/
