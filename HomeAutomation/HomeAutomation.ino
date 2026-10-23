@@ -11,20 +11,20 @@
 #define DHTTYPE DHT11
 
 // Network mode
-// 0 = DHCP (router assigns the IP). An Ethernet re-init can block up to ~60 s
-//     while the router itself is down, freezing local controls during that time.
+// 0 = DHCP (router assigns the IP). An Ethernet re-init can block up to
+//     dhcpTimeout (10 s) while the router itself is down, freezing local controls.
 // 1 = Static IP (recommended). Ethernet.begin() returns immediately, so local
 //     controls never freeze. Set the addresses below first.
 #define USE_STATIC_IP 0
 
-#include <UIPEthernet.h>  // ENC28J60
+#include <EthernetENC.h>  // ENC28J60 (the stack BlynkSimpleEthernetENC.h is built on)
 #include <BlynkSimpleEthernetENC.h>
 #include <DHT.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <TimeLib.h>
-#include <IRremote.h>
+#include <IRremote.hpp>  // IRremote 4.x
 
 #if USE_STATIC_IP
 IPAddress staticIP(192, 168, 1, 50);     // pick an address outside the router's DHCP pool
@@ -57,9 +57,6 @@ const unsigned long irCodes[] = {
   0xF807FF00,
   0xEA15FF00
 };
-
-IRrecv irrecv(irReceiverPin);
-decode_results results;
 
 DHT dht(DHTPIN, DHTTYPE);
 
@@ -162,6 +159,8 @@ const unsigned long reconnectIntervalMin = 5000;
 const unsigned long reconnectIntervalMax = 30000;
 uint8_t reconnectFailures = 0;
 const uint8_t failuresBeforeEthernetReset = 6;
+const unsigned long dhcpTimeout = 10000;      // library default is 60 s
+const uint16_t blynkConnectTimeout = 3000;    // TCP connect, library default is 5 s
 
 // Display timing (redraw only when something changed)
 unsigned long lastDisplayUpdate = 0;
@@ -330,9 +329,9 @@ void checkManualSwitches() {
 }
 
 void checkIRRemote() {
-  if (irrecv.decode(&results)) {
-    unsigned long receivedCode = results.value;
-    irrecv.resume();
+  if (IrReceiver.decode()) {
+    unsigned long receivedCode = IrReceiver.decodedIRData.decodedRawData;
+    IrReceiver.resume();
 
     for (int i = 0; i < numMomentaryRelays; i++) {
       if (receivedCode == irCodes[i]) {
@@ -369,7 +368,7 @@ bool startEthernet() {
   Ethernet.begin(mac, staticIP, dnsIP, gatewayIP, subnetMask);  // returns immediately
   bool ok = true;
 #else
-  bool ok = Ethernet.begin(mac) != 0;  // DHCP, blocks until a lease or timeout
+  bool ok = Ethernet.begin(mac, dhcpTimeout) != 0;  // DHCP, blocks until a lease or timeout
 #endif
 
   logUdp.begin(logPort);  // re-init wipes the UDP socket, so reopen it
@@ -486,7 +485,7 @@ void processLog() {
     char buf[24];
     int n = logUdp.read((unsigned char*)buf, sizeof(buf) - 1);
     buf[n > 0 ? n : 0] = 0;
-    logUdp.flush();
+    logUdp.discardReceived();
 
     unsigned int ackBoot, ackSeq;
     if (sscanf(buf, "ACK %u %u", &ackBoot, &ackSeq) == 2 &&
@@ -628,7 +627,7 @@ void setup() {
   delay(2000);
 
   dht.begin();
-  irrecv.enableIRIn();
+  IrReceiver.begin(irReceiverPin, DISABLE_LED_FEEDBACK);
 
   randomSeed(analogRead(A15) ^ micros());  // A15 left unconnected
   bootId = random(1, 65535);
@@ -638,6 +637,7 @@ void setup() {
   if (!ethernetOk) Serial.println(F("DHCP failed, running offline"));
   logEvent(EV_BOOT, ethernetOk, 0, 0);
   Blynk.config(auth);
+  _blynkEthernetClient.setConnectionTimeout(blynkConnectTimeout);  // client object from BlynkSimpleEthernetENC.h
   Blynk.connect(1000); // one short startup attempt
   lastReconnectAttempt = millis();
 
@@ -676,7 +676,7 @@ void loop() {
 
   // DHT read briefly disables interrupts, which corrupts an IR frame being
   // received, so only read while the IR receiver is idle
-  if (millis() - lastSensorRead >= sensorInterval && irrecv.isIdle()) {
+  if (millis() - lastSensorRead >= sensorInterval && IrReceiver.isIdle()) {
     lastSensorRead = millis();
     readSensor();
   }

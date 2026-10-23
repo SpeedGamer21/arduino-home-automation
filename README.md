@@ -32,16 +32,16 @@ An Arduino Mega controller for 8 relays. You can switch them from wall switches,
 ## Firmware setup
 
 1. Install these libraries in the Arduino IDE:
-   - UIPEthernet
+   - EthernetENC (the ENC28J60 stack Blynk uses; UIPEthernet is not needed)
    - Blynk
    - DHT sensor library (Adafruit), plus Adafruit Unified Sensor
    - Adafruit GFX and Adafruit SSD1306
    - Time
-   - IRremote (3.x or later)
+   - IRremote (4.x)
 2. Copy `HomeAutomation/secrets.example.h` to `HomeAutomation/secrets.h` and fill in your Blynk template ID, template name and auth token. `secrets.h` is git-ignored.
 3. Near the top of `HomeAutomation.ino`, choose the network mode:
    - `USE_STATIC_IP 1` (recommended): set `staticIP`, `dnsIP`, `gatewayIP` and `subnetMask`. Use an address outside your router's DHCP pool. Re-initialising Ethernet never blocks in this mode.
-   - `USE_STATIC_IP 0`: use DHCP. Re-initialising Ethernet can block for up to about 60 s while the router itself is down.
+   - `USE_STATIC_IP 0`: use DHCP. Re-initialising Ethernet can block for up to 10 s (`dhcpTimeout`) while the router itself is down.
 4. Set `nasIP` to your NAS's address if you use the logger.
 5. If your remote is different, replace the codes in `irCodes[]`. Entries 0–7 map to relays 1–8.
 
