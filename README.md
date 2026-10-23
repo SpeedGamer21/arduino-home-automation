@@ -68,14 +68,13 @@ Run it directly:
 LOG_DIR=/volume1/homeauto-logs python3 nas_logger.py
 ```
 
-Or run it with Docker:
+Or run it with Docker Compose, from the `nas-logger` folder:
 
 ```sh
-docker run -d --name homeauto-logger --restart unless-stopped -p 5140:5140/udp \
-  -v /volume1/homeauto-logs:/logs -v /path/to/nas-logger:/app \
-  -v /etc/localtime:/etc/localtime:ro -e LOG_DIR=/logs \
-  python:3.12-alpine python -u /app/nas_logger.py
+docker compose up -d
 ```
+
+By default, log files go to `nas-logger/logs`. To store them somewhere else, create a `.env` file next to `docker-compose.yml` containing, for example, `LOG_PATH=/volume1/homeauto-logs`. View the live output with `docker compose logs -f`.
 
 If the NAS has a firewall, allow UDP port 5140 from the controller.
 

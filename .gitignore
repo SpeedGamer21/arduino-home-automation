@@ -4,3 +4,6 @@ HomeAutomation/secrets.h
 # NAS logger output / Python cache
 logs/
 __pycache__/
+
+# Docker Compose local settings
+.env

@@ -1,0 +1,24 @@
+# Home automation event logger
+#
+#   cd nas-logger
+#   docker compose up -d
+#
+# Daily log files go to ./logs next to this file. To store them elsewhere,
+# set LOG_PATH, e.g. in a .env file next to this one:
+#   LOG_PATH=/volume1/homeauto-logs
+
+services:
+  homeauto-logger:
+    image: python:3.12-alpine
+    container_name: homeauto-logger
+    restart: unless-stopped
+    command: ["python", "-u", "/app/nas_logger.py"]
+    ports:
+      - "5140:5140/udp"   # must match logPort in the sketch
+    environment:
+      LOG_DIR: /logs
+      LOG_PORT: "5140"
+    volumes:
+      - ./nas_logger.py:/app/nas_logger.py:ro
+      - ${LOG_PATH:-./logs}:/logs
+      - /etc/localtime:/etc/localtime:ro   # log timestamps in the NAS's time zone
