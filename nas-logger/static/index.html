@@ -43,6 +43,28 @@
   h2::after { content: ""; flex: 1; height: 1px; background: var(--border); }
   .note { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
 
+  /* Climate dials: segmented arc with a redline, like a digital rev counter */
+  .dials { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .dial-card { position: relative; display: flex; justify-content: center; padding: 14px 10px 4px;
+               border: 1px solid var(--border); overflow: hidden;
+               background: radial-gradient(circle at 50% 48%, #1c1c21 0, #0d0d0f 68%); }
+  .dial-card::before { content: ""; position: absolute; top: 0; left: 0; width: 42px; height: 3px; background: var(--red); }
+  .dial { display: block; width: 100%; max-width: 270px; overflow: visible; }
+  .dial .ring { fill: none; stroke: #2a2a31; stroke-width: 1; }
+  .dial .redline { fill: none; stroke: var(--red); stroke-width: 2.5; }
+  .dial .seg { stroke: #222228; stroke-width: 4.6; transition: stroke .12s; }
+  .dial .seg.red { stroke: rgba(228, 0, 43, .26); }
+  .dial .seg.lit { stroke: #ececf1; }
+  .dial .seg.red.lit { stroke: var(--red-hi); filter: drop-shadow(0 0 3px var(--red)); }
+  .dial .major { stroke: #55555f; stroke-width: 1.5; }
+  .dial .tick { fill: var(--muted); font-size: 9px; font-weight: 700; font-style: italic; text-anchor: middle; dominant-baseline: middle; }
+  .dial .value { fill: var(--text); font-size: 42px; font-weight: 900; font-style: italic; text-anchor: middle;
+                 font-variant-numeric: tabular-nums; letter-spacing: -1px; }
+  .dial .unit { fill: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: 1.5px; text-anchor: middle; }
+  .dial .zone { font-size: 10px; font-weight: 800; font-style: italic; letter-spacing: 2px; text-anchor: middle; fill: var(--muted); }
+  .dial .zone.hot { fill: var(--red-hi); }
+  .dial .label { fill: var(--text); font-size: 11px; font-weight: 800; font-style: italic; letter-spacing: 3px; text-anchor: middle; }
+
   /* Relay cards */
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
   .card { position: relative; background: linear-gradient(160deg, var(--surface-2), var(--surface) 60%);
@@ -103,8 +125,6 @@
           <div class="status"><span class="dot"></span><span class="state">Loading</span></div></div>
         <div class="gauge" id="cloud"><div class="label">Blynk cloud</div>
           <div class="status"><span class="dot"></span><span class="state">Loading</span></div></div>
-        <div class="gauge"><div class="label">Temperature</div><div class="value" id="temp">--</div></div>
-        <div class="gauge"><div class="label">Humidity</div><div class="value" id="hum">--</div></div>
       </div>
     </div>
   </div>
@@ -120,6 +140,12 @@
   </nav>
 
   <section id="dash">
+    <h2>Climate</h2>
+    <div class="dials">
+      <div class="dial-card" id="tempDial"></div>
+      <div class="dial-card" id="humDial"></div>
+    </div>
+
     <h2>Relays</h2>
     <p id="relayNote" class="note" hidden></p>
     <div id="relays" class="grid"></div>
@@ -237,11 +263,110 @@ function setLink(id, state, text) {
   $(id + " .state").textContent = text;
 }
 
-function setReading(id, value, unit) {
-  const e = $(id);
-  e.replaceChildren(value);
-  if (value !== "--") e.append(el("small", null, unit));
+// ---------- Climate dials ----------
+const SVG_NS = "http://www.w3.org/2000/svg";
+const SEGMENTS = 46;
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function svg(tag, attrs, parent, text) {
+  const e = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  parent.append(e);
+  return e;
 }
+
+// t = 0..1 along a 270° arc that opens at the bottom, like a rev counter
+function polar(r, t) {
+  const a = (135 + 270 * t) * Math.PI / 180;
+  return [100 + r * Math.cos(a), 100 + r * Math.sin(a)];
+}
+
+function arcPath(r, t0, t1) {
+  const [x0, y0] = polar(r, t0), [x1, y1] = polar(r, t1);
+  return `M${x0} ${y0} A${r} ${r} 0 ${(t1 - t0) * 270 > 180 ? 1 : 0} 1 ${x1} ${y1}`;
+}
+
+function makeDial(container, cfg) {
+  const range = cfg.max - cfg.min;
+  const redT = (cfg.red - cfg.min) / range;
+  const root = svg("svg", { viewBox: "0 0 200 186", class: "dial", role: "img", "aria-label": cfg.label }, container);
+  svg("path", { d: arcPath(93, 0, 1), class: "ring" }, root);
+  svg("path", { d: arcPath(68, redT, 1), class: "redline" }, root);
+
+  const segs = [];
+  for (let i = 0; i < SEGMENTS; i++) {
+    const t = (i + 0.5) / SEGMENTS;
+    const [x1, y1] = polar(74, t), [x2, y2] = polar(88, t);
+    segs.push(svg("line", { x1, y1, x2, y2, class: "seg" + (t >= redT ? " red" : "") }, root));
+  }
+  for (const v of cfg.majors) {
+    const t = (v - cfg.min) / range;
+    const [x1, y1] = polar(66, t), [x2, y2] = polar(70, t), [tx, ty] = polar(57, t);
+    svg("line", { x1, y1, x2, y2, class: "major" }, root);
+    svg("text", { x: tx, y: ty, class: "tick" }, root, v);
+  }
+  const value = svg("text", { x: 100, y: 112, class: "value" }, root, "--");
+  svg("text", { x: 100, y: 131, class: "unit" }, root, cfg.unit);
+  const zone = svg("text", { x: 100, y: 150, class: "zone" }, root, "");
+  svg("text", { x: 100, y: 180, class: "label" }, root, cfg.label.toUpperCase());
+
+  let shown = null, target = null, frame = 0, sweptIn = false;
+
+  function draw(v) {
+    const t = v == null ? 0 : Math.min(1, Math.max(0, (v - cfg.min) / range));
+    const lit = Math.round(t * SEGMENTS);
+    segs.forEach((s, i) => s.classList.toggle("lit", i < lit));
+    value.textContent = v == null ? "--" : v.toFixed(cfg.decimals);
+  }
+
+  function animate(from, to, ms) {
+    return new Promise((done) => {
+      const start = performance.now();
+      cancelAnimationFrame(frame);
+      const step = (now) => {
+        const p = Math.min(1, (now - start) / ms);
+        shown = from + (to - from) * (1 - Math.pow(1 - p, 3));  // ease out
+        draw(shown);
+        if (p < 1) frame = requestAnimationFrame(step); else done();
+      };
+      frame = requestAnimationFrame(step);
+    });
+  }
+
+  return {
+    async set(v) {
+      if (v === target) return;
+      target = v;
+      const z = v == null ? null : cfg.zones.find(([limit]) => v < limit) || cfg.zones[cfg.zones.length - 1];
+      zone.textContent = z ? z[1] : "";
+      zone.classList.toggle("hot", v != null && v >= cfg.red);
+
+      if (v == null || reducedMotion) {
+        cancelAnimationFrame(frame);
+        shown = v;
+        return draw(v);
+      }
+      if (!sweptIn) {  // start-up sweep: full scale and back, like a cluster self-test
+        sweptIn = true;
+        await animate(cfg.min, cfg.max, 650);
+        return animate(cfg.max, target, 800);
+      }
+      animate(shown ?? cfg.min, v, 600);
+    },
+  };
+}
+
+const tempDial = makeDial($("#tempDial"), {
+  label: "Temperature", unit: "°C", min: 0, max: 50, red: 35, decimals: 1,
+  majors: [0, 10, 20, 30, 40, 50],
+  zones: [[18, "COLD"], [28, "NORMAL"], [35, "WARM"], [Infinity, "HOT"]],
+});
+const humDial = makeDial($("#humDial"), {
+  label: "Humidity", unit: "% RH", min: 0, max: 100, red: 80, decimals: 0,
+  majors: [0, 20, 40, 60, 80, 100],
+  zones: [[30, "DRY"], [60, "NORMAL"], [80, "HUMID"], [Infinity, "VERY HUMID"]],
+});
 
 function renderStatus() {
   const s = status;
@@ -271,8 +396,8 @@ function renderStatus() {
       note.hidden = false;
     }
   }
-  setReading("#temp", s.temperature != null ? s.temperature.toFixed(1) : "--", "°C");
-  setReading("#hum", s.humidity != null ? String(Math.round(s.humidity)) : "--", "%");
+  tempDial.set(s.reachable ? s.temperature ?? null : null);
+  humDial.set(s.reachable ? s.humidity ?? null : null);
 
   const grid = $("#relays");
   grid.replaceChildren();
