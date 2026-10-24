@@ -121,7 +121,7 @@ DEVICE_IP=192.168.1.50                  # the controller's address
 DEVICE_KEY=same-as-LOCAL_CONTROL_KEY    # from secrets.h
 WEB_USER=admin
 WEB_PASSWORD=choose-a-strong-password
-RELAY_NAMES=Gate,Garage,Door 3,Door 4,Lights,Fan,Pump,Heater   # optional
+# RELAY_NAMES=Gate,Garage           # optional; relays show as Switch 1-8 by default
 WEB_PORT=8080                           # optional, host port
 ```
 

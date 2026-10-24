@@ -15,7 +15,7 @@ Settings via environment variables:
                 logs only
   DEVICE_KEY    same value as LOCAL_CONTROL_KEY in secrets.h
   DEVICE_PORT   the controller's UDP port            (default: 5140, logPort)
-  RELAY_NAMES   comma-separated names for relays 1-8 (default: Relay 1..8)
+  RELAY_NAMES   comma-separated names for relays 1-8 (default: Switch 1..8)
 """
 import hmac
 import io
@@ -46,7 +46,7 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 TOTAL_RELAYS = 8
 MOMENTARY_RELAYS = 4  # relays 1-4 pulse, relays 5-8 toggle
 _names = [n.strip() for n in os.environ.get("RELAY_NAMES", "").split(",")]
-RELAY_NAMES = [(_names[i] if i < len(_names) and _names[i] else f"Relay {i + 1}")
+RELAY_NAMES = [(_names[i] if i < len(_names) and _names[i] else f"Switch {i + 1}")
                for i in range(TOTAL_RELAYS)]
 
 DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
