@@ -24,7 +24,8 @@ services:
       - /etc/localtime:/etc/localtime:ro   # log timestamps in the NAS's time zone
 
   # Web app: dashboard + log browser on http://<nas>:8080
-  # Relay control needs BLYNK_TOKEN; protect it with a login (WEB_USER / WEB_PASSWORD).
+  # Relay control needs DEVICE_IP and DEVICE_KEY (= LOCAL_CONTROL_KEY in
+  # secrets.h); protect it with a login (WEB_USER / WEB_PASSWORD).
   # Set these in the .env file next to this one.
   homeauto-web:
     image: python:3.12-alpine
@@ -38,8 +39,9 @@ services:
       WEB_PORT: "8080"
       WEB_USER: ${WEB_USER:-}
       WEB_PASSWORD: ${WEB_PASSWORD:-}
-      BLYNK_TOKEN: ${BLYNK_TOKEN:-}
-      BLYNK_SERVER: ${BLYNK_SERVER:-blynk.cloud}
+      DEVICE_IP: ${DEVICE_IP:-}
+      DEVICE_KEY: ${DEVICE_KEY:-}
+      DEVICE_PORT: ${DEVICE_PORT:-5140}   # logPort in the sketch
       RELAY_NAMES: ${RELAY_NAMES:-}
     volumes:
       - ./web_app.py:/app/web_app.py:ro

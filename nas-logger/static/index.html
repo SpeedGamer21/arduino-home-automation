@@ -23,7 +23,11 @@
   .gauge .value small { font-size: 13px; color: var(--muted); font-weight: 600; margin-left: 2px; }
   .gauge .status { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; font-style: italic;
                    text-transform: uppercase; letter-spacing: .5px; line-height: 1.2; margin-top: 4px; }
-  .logout { margin: 0; }
+  .logout { margin: 0 0 0 auto; }
+  @media (max-width: 600px) {
+    .gauges { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+    .gauge { min-width: 0; }
+  }
 
   /* Tabs */
   nav { display: flex; gap: 6px; margin: 22px 0 6px; }
@@ -91,18 +95,17 @@
         <span class="badge">HA</span>
         <div>
           <h1 class="title">Home <em>Automation</em></h1>
-          <div class="subtitle">Mega 2560 · 8-channel controller</div>
+          <div class="subtitle">Mega 2560 · 8-channel controller<span id="uptime"></span></div>
         </div>
       </div>
       <div class="gauges">
-        <div class="gauge"><div class="label">Controller</div>
-          <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Loading</span></div></div>
+        <div class="gauge" id="lan"><div class="label">Local network</div>
+          <div class="status"><span class="dot"></span><span class="state">Loading</span></div></div>
+        <div class="gauge" id="cloud"><div class="label">Blynk cloud</div>
+          <div class="status"><span class="dot"></span><span class="state">Loading</span></div></div>
         <div class="gauge"><div class="label">Temperature</div><div class="value" id="temp">--</div></div>
         <div class="gauge"><div class="label">Humidity</div><div class="value" id="hum">--</div></div>
       </div>
-      <form class="logout" method="post" action="logout" id="logout" hidden>
-        <button class="btn" type="submit">Log out</button>
-      </form>
     </div>
   </div>
 </header>
@@ -111,6 +114,9 @@
   <nav role="tablist">
     <button role="tab" aria-selected="true" data-panel="dash">Dashboard</button>
     <button role="tab" aria-selected="false" data-panel="logs">Logs</button>
+    <form class="logout" method="post" action="logout" id="logout" hidden>
+      <button class="btn" type="submit">Log out</button>
+    </form>
   </nav>
 
   <section id="dash">
@@ -215,10 +221,20 @@ let status = null;
 async function loadStatus() {
   try {
     status = await api("api/status");
-  } catch (err) {
-    status = { blynk: true, online: false, error: err.message };
+  } catch (err) {  // the web app itself is unreachable
+    status = { configured: true, reachable: false, error: "Can't reach the web app: " + err.message };
   }
   renderStatus();
+}
+
+function duration(s) {
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : m ? `${m}m` : `${s}s`;
+}
+
+function setLink(id, state, text) {
+  $(id + " .dot").className = "dot " + state;
+  $(id + " .state").textContent = text;
 }
 
 function setReading(id, value, unit) {
@@ -229,27 +245,29 @@ function setReading(id, value, unit) {
 
 function renderStatus() {
   const s = status;
-  const dot = $("#statusDot"), text = $("#statusText"), note = $("#relayNote");
-  dot.className = "dot";
+  const note = $("#relayNote");
   note.hidden = true;
   note.classList.remove("error");
   if (s.login) $("#logout").hidden = false;
+  $("#uptime").textContent = s.reachable ? " · up " + duration(s.uptime) : "";
 
-  if (!s.blynk) {
-    text.textContent = "Logs only";
-    note.textContent = "Set BLYNK_TOKEN on the server to show relays and readings and control them from here.";
+  if (!s.configured) {
+    setLink("#lan", "", "Not set up");
+    setLink("#cloud", "", "Unknown");
+    note.textContent = "Set DEVICE_IP and DEVICE_KEY on the server to show the relays and control them from here.";
     note.hidden = false;
-  } else if (s.error) {
-    dot.classList.add("bad");
-    text.textContent = "No Blynk";
-    note.textContent = s.error;
+  } else if (!s.reachable) {
+    setLink("#lan", "down", "Unreachable");
+    setLink("#cloud", "", "Unknown");
+    note.textContent = s.error + (s.lastSeenAgo != null ? ` (last reply ${duration(s.lastSeenAgo)} ago)` : "") +
+      ". Check that the controller is powered and connected to the network.";
     note.classList.add("error");
     note.hidden = false;
   } else {
-    dot.classList.add(s.online ? "ok" : "bad");
-    text.textContent = s.online ? "Online" : "Offline";
-    if (!s.online) {
-      note.textContent = "The controller is offline, so relays can only be switched locally. States shown are the last known.";
+    setLink("#lan", "ok", "Online");
+    setLink("#cloud", s.blynk ? "ok" : "bad", s.blynk ? "Connected" : "Offline");
+    if (!s.blynk) {
+      note.textContent = "Blynk is offline (internet or Blynk server down). You can still control everything from this page.";
       note.hidden = false;
     }
   }
@@ -260,7 +278,7 @@ function renderStatus() {
   grid.replaceChildren();
   grid.hidden = !s.relays;
   if (!s.relays) return;
-  const canControl = s.online && !s.error;
+  const canControl = s.reachable;
 
   for (const r of s.relays) {
     const card = el("div", "card" + (r.momentary ? " momentary" : r.on ? " on" : ""));
@@ -291,12 +309,12 @@ async function relayAction(btn, relay, body, doneText) {
   btn.disabled = true;
   btn.textContent = "Sending…";
   try {
-    await api("api/relay/" + relay.n, {
+    // The reply is the controller's state right after the command
+    const newStatus = await api("api/relay/" + relay.n, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     btn.textContent = doneText;
-    if (!relay.momentary) relay.on = body.on;
-    setTimeout(() => { renderStatus(); loadRecent(); }, 1200);
+    setTimeout(() => { status = newStatus; renderStatus(); loadRecent(); }, 1200);
   } catch (err) {
     btn.textContent = label;
     btn.disabled = false;
@@ -372,12 +390,9 @@ let savedTab = "dash";
 try { savedTab = localStorage.getItem("tab") || "dash"; } catch (_) {}
 showTab(savedTab === "logs" ? "logs" : "dash");
 
-// Refresh while the page is visible; the server caches Blynk for 10 s
-setInterval(() => {
-  if (document.hidden) return;
-  loadStatus();
-  loadRecent();
-}, 15000);
+// Refresh while the page is visible
+setInterval(() => { if (!document.hidden) loadStatus(); }, 5000);
+setInterval(() => { if (!document.hidden) loadRecent(); }, 15000);
 setInterval(() => { if (!document.hidden) loadDays(); }, 60000);
 </script>
 </body>

@@ -1,43 +1,50 @@
 #!/usr/bin/env python3
 """Home automation web app.
 
-Serves a dashboard (relays, temperature, humidity) and a browser for the
-daily log files written by nas_logger.py. Relay control and sensor readings
-go through the Blynk HTTP API, so the controller firmware needs no changes.
+Serves a dashboard (relays, temperature, humidity, connection status) and a
+browser for the daily log files written by nas_logger.py. The dashboard talks
+straight to the controller over the LAN (UDP), so it keeps working when Blynk
+or the internet is down.
 
 Settings via environment variables:
   LOG_DIR       folder with the daily .txt files     (default: ./logs)
   WEB_PORT      HTTP port                            (default: 8080)
-  WEB_USER      login for the web page; set both when BLYNK_TOKEN is set,
+  WEB_USER      login for the web page; set both when DEVICE_IP is set,
   WEB_PASSWORD  since the page can open the gate / garage
-  BLYNK_TOKEN   device auth token (same as in secrets.h); without it the
-                dashboard shows the logs only
-  BLYNK_SERVER  Blynk server host                    (default: blynk.cloud)
+  DEVICE_IP     the controller's IP address; without it the page shows the
+                logs only
+  DEVICE_KEY    same value as LOCAL_CONTROL_KEY in secrets.h
+  DEVICE_PORT   the controller's UDP port            (default: 5140, logPort)
   RELAY_NAMES   comma-separated names for relays 1-8 (default: Relay 1..8)
 """
 import hmac
 import io
 import json
+import math
 import os
+import random
 import re
 import secrets
+import socket
+import sys
+import threading
 import time
 import zipfile
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlencode, urlparse
-from urllib.request import urlopen
+from urllib.parse import parse_qs, urlparse
 
 LOG_DIR = os.environ.get("LOG_DIR", "logs")
 PORT = int(os.environ.get("WEB_PORT", "8080"))
 WEB_USER = os.environ.get("WEB_USER", "")
 WEB_PASSWORD = os.environ.get("WEB_PASSWORD", "")
-BLYNK_TOKEN = os.environ.get("BLYNK_TOKEN", "")
-BLYNK_SERVER = os.environ.get("BLYNK_SERVER", "blynk.cloud")
+DEVICE_IP = os.environ.get("DEVICE_IP", "")
+DEVICE_KEY = os.environ.get("DEVICE_KEY", "")
+DEVICE_PORT = int(os.environ.get("DEVICE_PORT", "5140"))
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 TOTAL_RELAYS = 8
-MOMENTARY_RELAYS = 4  # relays 1-4 pulse (V0-V3), relays 5-8 toggle (V4-V7)
+MOMENTARY_RELAYS = 4  # relays 1-4 pulse, relays 5-8 toggle
 _names = [n.strip() for n in os.environ.get("RELAY_NAMES", "").split(",")]
 RELAY_NAMES = [(_names[i] if i < len(_names) and _names[i] else f"Relay {i + 1}")
                for i in range(TOTAL_RELAYS)]
@@ -45,7 +52,9 @@ RELAY_NAMES = [(_names[i] if i < len(_names) and _names[i] else f"Relay {i + 1}"
 DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 LINE_RE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})  (.*)")
 MAX_LIMIT = 2000
-STATUS_CACHE_SECONDS = 10  # keeps Blynk API usage low with several viewers
+STATUS_CACHE_SECONDS = 3  # several open pages share one request to the controller
+REPLY_TIMEOUT = 0.6       # per attempt; the controller answers within a loop pass
+ATTEMPTS = 3
 SESSION_SECONDS = 30 * 24 * 3600
 STATIC_FILES = {"/": "index.html", "/style.css": "style.css"}
 PUBLIC_PATHS = {"/login", "/style.css"}
@@ -108,76 +117,107 @@ def zip_all_logs():
 
 
 # ------------------------
-# Blynk
+# Controller (local UDP, see handleControl() in the sketch)
 # ------------------------
-class BlynkError(Exception):
+class DeviceError(Exception):
     pass
 
 
-def blynk(endpoint, query):
-    url = f"https://{BLYNK_SERVER}/external/api/{endpoint}?token={BLYNK_TOKEN}&{query}"
-    try:
-        with urlopen(url, timeout=5) as r:
-            return r.read().decode("utf-8")
-    except OSError as e:  # URLError, HTTPError and timeouts; never echo the URL (has the token)
-        raise BlynkError(f"Blynk request failed: {getattr(e, 'reason', e)}") from None
-
-
+_device_lock = threading.Lock()  # one request at a time; the controller buffers only 2 packets
+_next_id = random.randint(1, 65535)
+_last_seen = None  # time.time() of the last reply
 _status_cache = {"at": 0.0, "value": None}
 
 
-def controller_status():
-    if not BLYNK_TOKEN:
-        return {"blynk": False}
-    if _status_cache["value"] and time.monotonic() - _status_cache["at"] < STATUS_CACHE_SECONDS:
-        return _status_cache["value"]
+def parse_reply(parts):
+    """'R <id> <OK|ERR> <relay bits> <blynk 0|1> <uptime s> <temp> <hum>' -> dict"""
+    def number(text):
+        value = float(text)
+        return None if math.isnan(value) else value
 
-    online = blynk("isHardwareConnected", "").strip() == "true"
-    try:
-        raw = json.loads(blynk("get", "V4&V5&V6&V7&V15&V16"))
-        values = {k.upper(): v for k, v in raw.items()}
-    except (ValueError, AttributeError):
-        raise BlynkError("Unexpected reply from Blynk") from None
+    bits = int(parts[3])
+    return {
+        "ok": parts[2] == "OK",
+        "blynk": parts[4] == "1",
+        "uptime": int(parts[5]),
+        "temperature": number(parts[6]),
+        "humidity": number(parts[7]),
+        "relays": [{"n": i + 1, "name": RELAY_NAMES[i], "momentary": i < MOMENTARY_RELAYS,
+                    "on": bool(bits >> i & 1)} for i in range(TOTAL_RELAYS)],
+    }
 
-    def number(pin):
-        try:
-            return float(values[pin])
-        except (KeyError, TypeError, ValueError):
-            return None
 
-    relays = []
-    for i in range(TOTAL_RELAYS):
-        momentary = i < MOMENTARY_RELAYS
-        on = None if momentary else number(f"V{i}") == 1
-        relays.append({"n": i + 1, "name": RELAY_NAMES[i], "momentary": momentary, "on": on})
+def device_request(command):
+    """Send one command and return the parsed reply. A lost packet is resent
+    with the same id, so the controller won't run a command twice."""
+    global _next_id, _last_seen
+    with _device_lock:
+        _next_id = _next_id % 65535 + 1
+        request_id = str(_next_id)
+        packet = f"C {DEVICE_KEY} {request_id} {command}".encode("ascii")
 
-    status = {"blynk": True, "online": online, "temperature": number("V15"),
-              "humidity": number("V16"), "relays": relays}
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            for _ in range(ATTEMPTS):
+                try:
+                    sock.sendto(packet, (DEVICE_IP, DEVICE_PORT))
+                except OSError:
+                    break  # no route to the controller's network
+                deadline = time.monotonic() + REPLY_TIMEOUT
+                while (left := deadline - time.monotonic()) > 0:
+                    sock.settimeout(left)
+                    try:
+                        data, addr = sock.recvfrom(128)
+                    except OSError:  # timeout, or ICMP port unreachable
+                        break
+                    parts = data.decode("ascii", "replace").split()
+                    if addr[0] != DEVICE_IP or len(parts) != 8 or parts[:2] != ["R", request_id]:
+                        continue  # late reply to an earlier attempt or request
+                    try:
+                        reply = parse_reply(parts)
+                    except ValueError:
+                        continue
+                    _last_seen = time.time()
+                    return reply
+    raise DeviceError(f"No reply from the controller at {DEVICE_IP}")
+
+
+def cache_status(status):
     _status_cache.update(at=time.monotonic(), value=status)
-    return status
+
+
+def controller_status():
+    if not DEVICE_IP:
+        return {"configured": False}
+    status = _status_cache["value"]
+    if not status or time.monotonic() - _status_cache["at"] >= STATUS_CACHE_SECONDS:
+        try:
+            reply = device_request("S")
+            reply.pop("ok")
+            status = {"configured": True, "reachable": True, **reply}
+        except DeviceError as e:
+            status = {"configured": True, "reachable": False, "error": str(e)}
+        cache_status(status)
+    seen_ago = None if _last_seen is None else int(time.time() - _last_seen)
+    return {**status, "device": DEVICE_IP, "lastSeenAgo": seen_ago}
 
 
 def set_relay(n, body):
     """Pulse a momentary relay or switch a power relay. Returns an error message or None."""
-    if not BLYNK_TOKEN:
-        return "Blynk is not configured (BLYNK_TOKEN)"
+    if not DEVICE_IP:
+        return "DEVICE_IP is not set"
     if not 1 <= n <= TOTAL_RELAYS:
         return "No such relay"
-    # A write while offline would be applied on reconnect, possibly much later
-    if blynk("isHardwareConnected", "").strip() != "true":
-        return "Controller is offline"
-
-    pin = f"V{n - 1}"
     if n <= MOMENTARY_RELAYS:
-        # The sketch pulses on 1 and ignores 0; resetting to 0 leaves the
-        # datastream ready for the next press
-        blynk("update", urlencode({pin: 1}))
-        blynk("update", urlencode({pin: 0}))
+        command = f"P {n}"
+    elif isinstance(body.get("on"), bool):
+        command = f"W {n} {int(body['on'])}"
     else:
-        if not isinstance(body.get("on"), bool):
-            return 'Expected {"on": true|false}'
-        blynk("update", urlencode({pin: int(body["on"])}))
-    _status_cache["value"] = None
+        return 'Expected {"on": true|false}'
+
+    reply = device_request(command)
+    if not reply.pop("ok"):
+        return "The controller rejected the command"
+    cache_status({"configured": True, "reachable": True, **reply})
     return None
 
 
@@ -290,8 +330,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_body(f.read(), "text/plain; charset=utf-8", filename=m[1] + ".txt")
             else:
                 self.send_json({"error": "Not found"}, 404)
-        except BlynkError as e:
-            self.send_json({"error": str(e)}, 502)
+        except OSError as e:  # e.g. a log file deleted while being read
+            self.send_json({"error": str(e)}, 500)
 
     def send_static(self, name):
         content_type = "text/css" if name.endswith(".css") else "text/html; charset=utf-8"
@@ -341,11 +381,11 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             error = set_relay(int(m[1]), body)
-        except BlynkError as e:
-            return self.send_json({"error": str(e)}, 502)
+        except DeviceError as e:
+            return self.send_json({"error": str(e)}, 504)
         if error:
-            return self.send_json({"error": error}, 409 if error == "Controller is offline" else 400)
-        self.send_json({"ok": True})
+            return self.send_json({"error": error}, 400)
+        self.send_json({**controller_status(), "login": login_enabled()})
 
     def post_login(self):
         if not login_enabled():
@@ -359,10 +399,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    if DEVICE_IP and not re.fullmatch(r"[!-~]{1,32}", DEVICE_KEY):
+        sys.exit("DEVICE_KEY must be set to LOCAL_CONTROL_KEY from secrets.h (1-32 characters, no spaces)")
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"Web app on http://0.0.0.0:{PORT}, reading logs from {os.path.abspath(LOG_DIR)}", flush=True)
-    if not BLYNK_TOKEN:
-        print("BLYNK_TOKEN not set: relay control and sensor readings are disabled", flush=True)
+    if not DEVICE_IP:
+        print("DEVICE_IP not set: relay control and readings are disabled", flush=True)
     elif not (WEB_USER and WEB_PASSWORD):
         print("WARNING: relay control is enabled without WEB_USER / WEB_PASSWORD", flush=True)
     server.serve_forever()

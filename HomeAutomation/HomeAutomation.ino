@@ -37,6 +37,13 @@ IPAddress subnetMask(255, 255, 255, 0);
 IPAddress nasIP(192, 168, 1, 10);   // your NAS address
 const unsigned int logPort = 5140;  // UDP port, same on both sides
 
+// Local control: the web app on the NAS sends commands to logPort on this
+// controller, so the relays work from the web page even when Blynk or the
+// internet is down. Requests must carry LOCAL_CONTROL_KEY from secrets.h.
+#ifndef LOCAL_CONTROL_KEY
+#error "Add #define LOCAL_CONTROL_KEY \"...\" to secrets.h (see secrets.example.h)"
+#endif
+
 // Relay pins
 const int relayPins[]  = {45, 43, 41, 39, 37, 35, 33, 31};
 const int switchPins[] = {44, 42, 40, 38, 36, 34, 32, 30};
@@ -185,7 +192,7 @@ unsigned long offlineSince = 0;
 // one. Unacked events are resent, so events that happen while the LAN or the
 // ENC28J60 is down still arrive (with their original time) once it's back.
 enum EventType : uint8_t { EV_BOOT, EV_ONLINE, EV_OFFLINE, EV_ETH_REINIT, EV_MOMENTARY, EV_POWER, EV_DROPPED };
-enum EventSource : uint8_t { SRC_APP, SRC_IR, SRC_SWITCH };
+enum EventSource : uint8_t { SRC_APP, SRC_IR, SRC_SWITCH, SRC_WEB };
 
 struct LogEvent {
   uint32_t ms;     // millis() when it happened
@@ -209,6 +216,7 @@ unsigned long lastLogSend = 0;
 const unsigned long logRetryInterval = 2000;
 unsigned long lastHeartbeat = 0;
 const unsigned long heartbeatInterval = 60000;
+uint16_t lastControlId = 0;  // a resent web command is answered again but not re-run
 
 // ------------------------
 // Relay helpers
@@ -270,6 +278,10 @@ void setPowerRelayFromApp(int i, int value) {
 
   digitalWrite(relayPins[relayIndex], on ? LOW : HIGH);
   pendingAppUpdate[i] = false;
+}
+
+void setPowerRelayFromWeb(int relayIndex, bool on) {
+  if (on != isRelayOn(relayIndex)) togglePowerRelay(relayIndex, SRC_WEB);
 }
 
 // ------------------------
@@ -433,7 +445,8 @@ void logEvent(uint8_t type, uint8_t a, uint8_t b, uint32_t value) {
 void printSource(uint8_t source) {
   if (source == SRC_APP) logUdp.print(F("app"));
   else if (source == SRC_IR) logUdp.print(F("IR remote"));
-  else logUdp.print(F("wall switch"));
+  else if (source == SRC_SWITCH) logUdp.print(F("wall switch"));
+  else logUdp.print(F("web app"));
 }
 
 void printEvent(const LogEvent &e) {
@@ -478,17 +491,68 @@ void printEvent(const LogEvent &e) {
   }
 }
 
-// Non-blocking: handles at most one ack and one send per call
+// Local control request from the web app (shares the log socket: EthernetENC
+// has only 2 UDP sockets and DNS / DHCP need the other one)
+//   "C <key> <id> S"                 status only
+//   "C <key> <id> P <relay 1-4>"     pulse a momentary relay
+//   "C <key> <id> W <relay 5-8> <0|1>"  switch a power relay
+// Reply: "R <id> <OK|ERR> <relay bits> <blynk 0|1> <uptime s> <temp> <hum>"
+void handleControl(char *msg) {
+  char *key = strtok(msg + 2, " ");
+  char *idText = strtok(NULL, " ");
+  char *cmd = strtok(NULL, " ");
+  char *relayText = strtok(NULL, " ");
+  char *valueText = strtok(NULL, " ");
+  if (!key || !idText || !cmd || strcmp(key, LOCAL_CONTROL_KEY) != 0) return;  // ignore silently
+
+  uint16_t id = strtoul(idText, NULL, 10);
+  int relay = relayText ? atoi(relayText) : 0;
+  bool isNew = id != lastControlId;  // the web app resends with the same id if a reply is lost
+  bool ok = true;
+
+  if (*cmd == 'P' && relay >= 1 && relay <= numMomentaryRelays) {
+    if (isNew) triggerMomentaryRelay(relay - 1, SRC_WEB);
+  } else if (*cmd == 'W' && relay > numMomentaryRelays && relay <= totalRelays && valueText) {
+    if (isNew) setPowerRelayFromWeb(relay - 1, atoi(valueText) != 0);
+  } else if (*cmd != 'S') {
+    ok = false;
+  }
+  if (*cmd != 'S') lastControlId = id;
+
+  uint8_t relayBits = 0;
+  for (int i = 0; i < totalRelays; i++) {
+    if (isRelayOn(i)) relayBits |= 1 << i;
+  }
+
+  if (logUdp.beginPacket(logUdp.remoteIP(), logUdp.remotePort())) {
+    logUdp.print(F("R "));
+    logUdp.print(id);
+    logUdp.print(ok ? F(" OK ") : F(" ERR "));
+    logUdp.print(relayBits);
+    logUdp.print(Blynk.connected() ? F(" 1 ") : F(" 0 "));
+    logUdp.print(millis() / 1000);
+    logUdp.print(' ');
+    logUdp.print(temperature, 1);  // "nan" until the first good reading
+    logUdp.print(' ');
+    logUdp.print(humidity, 1);
+    logUdp.endPacket();
+  }
+}
+
+// Non-blocking: handles at most two incoming packets and one send per call
 void processLog() {
-  // Ack from the NAS: "ACK <bootId> <seq>"
-  if (logUdp.parsePacket() > 0) {
-    char buf[24];
+  // Acks from the NAS ("ACK <bootId> <seq>") and web app requests ("C ...").
+  // The library buffers up to 2 incoming packets.
+  for (uint8_t i = 0; i < 2 && logUdp.parsePacket() > 0; i++) {
+    char buf[64];
     int n = logUdp.read((unsigned char*)buf, sizeof(buf) - 1);
     buf[n > 0 ? n : 0] = 0;
     logUdp.discardReceived();
 
     unsigned int ackBoot, ackSeq;
-    if (sscanf(buf, "ACK %u %u", &ackBoot, &ackSeq) == 2 &&
+    if (buf[0] == 'C' && buf[1] == ' ') {
+      handleControl(buf);
+    } else if (sscanf(buf, "ACK %u %u", &ackBoot, &ackSeq) == 2 &&
         logCount > 0 && ackBoot == bootId && ackSeq == logQueue[logHead].seq) {
       logHead = (logHead + 1) % logQueueSize;
       logCount--;

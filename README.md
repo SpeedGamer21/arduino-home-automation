@@ -1,13 +1,13 @@
 # Arduino Home Automation
 
-An Arduino Mega controller for 8 relays. You can switch them from wall switches, an IR remote, or the Blynk app. Local control keeps working when the internet or the network is down. Events are logged to a NAS as one text file per day.
+An Arduino Mega controller for 8 relays. You can switch them from wall switches, an IR remote, the Blynk app, or a web page on your NAS. Local control keeps working when the internet or the network is down. Events are logged to a NAS as one text file per day.
 
 ## Features
 
 - **8 relays (active LOW)**
   - Relays 1–4 are *momentary*. They pulse for 1 s, for things like gate or garage openers.
   - Relays 5–8 are *power* relays that toggle on and off.
-- **Three ways to control them:** wall push buttons, an NEC IR remote, and the Blynk app.
+- **Four ways to control them:** wall push buttons, an NEC IR remote, the Blynk app, and a web app on the NAS. The web app talks to the controller over the LAN, so it keeps working when the internet or Blynk is down.
 - **Offline-first.** Switches and IR never wait on the network.
   - Blynk reconnects in the background, retrying less often the longer it's offline.
   - The ENC28J60 is re-initialised only after repeated failures.
@@ -38,10 +38,10 @@ An Arduino Mega controller for 8 relays. You can switch them from wall switches,
    - Adafruit GFX and Adafruit SSD1306
    - Time
    - IRremote (4.x)
-2. Copy `HomeAutomation/secrets.example.h` to `HomeAutomation/secrets.h` and fill in your Blynk template ID, template name and auth token. `secrets.h` is git-ignored.
+2. Copy `HomeAutomation/secrets.example.h` to `HomeAutomation/secrets.h` and fill in your Blynk template ID, template name and auth token. If you use the web app, also set `LOCAL_CONTROL_KEY` to a random string (no spaces, up to 32 characters). `secrets.h` is git-ignored.
 3. Near the top of `HomeAutomation.ino`, choose the network mode:
    - `USE_STATIC_IP 1` (recommended): set `staticIP`, `dnsIP`, `gatewayIP` and `subnetMask`. Use an address outside your router's DHCP pool. Re-initialising Ethernet never blocks in this mode.
-   - `USE_STATIC_IP 0`: use DHCP. Re-initialising Ethernet can block for up to 10 s (`dhcpTimeout`) while the router itself is down.
+   - `USE_STATIC_IP 0`: use DHCP. Re-initialising Ethernet can block for up to 10 s (`dhcpTimeout`) while the router itself is down. If you use the web app, reserve the controller's address in your router so it doesn't change.
 4. Set `nasIP` to your NAS's address if you use the logger.
 5. If your remote is different, replace the codes in `irCodes[]`. Entries 0–7 map to relays 1–8.
 
@@ -101,28 +101,36 @@ Example log:
 
 `nas-logger/web_app.py` (Python 3 standard library only) serves a web page on port 8080. When `WEB_USER` and `WEB_PASSWORD` are set, it asks you to sign in first and keeps you signed in for 30 days (restarting the app signs everyone out). After signing in there are two tabs:
 
-- **Dashboard.** Shows whether the controller is online, the temperature and humidity, and the 8 relays. You can pulse relays 1–4 and switch relays 5–8 on or off. It also shows the latest log entries.
+- **Dashboard.** Shows the controller's connection to the local network and to Blynk, its uptime, the temperature and humidity, and the 8 relays. You can pulse relays 1–4 and switch relays 5–8 on or off. It also shows the latest log entries.
 - **Logs.** Browse every logged event, either all days or one day at a time. Filter by type (relay, network, system), search the text (e.g. `IR remote` or `Relay 5`), and download a single day as `.txt` or all logs as a `.zip`.
 
-The page talks to the controller through the Blynk HTTP API, so the firmware does not change. Without `BLYNK_TOKEN` the page shows the logs only. While the controller is offline, relay buttons are disabled so a command can't be applied by surprise when it reconnects.
+The web app talks straight to the controller over the LAN, never through the Blynk servers, so you can still control everything when the internet or Blynk is down. Commands go over UDP to the controller's `logPort` (5140), the same socket the event log uses. Each command carries `LOCAL_CONTROL_KEY`, and the controller ignores anything without it. A lost packet is resent with the same request id, so a pulse never runs twice. Changes made from the web page are logged as `by web app` and are pushed to the Blynk app when it's connected.
+
+Connection status on the dashboard:
+
+| Indicator | Meaning |
+|---|---|
+| Local network: Online | The controller answered the web app over the LAN. |
+| Local network: Unreachable | No answer after 3 tries. The controller is off or disconnected, `DEVICE_IP` is wrong, or `DEVICE_KEY` doesn't match `LOCAL_CONTROL_KEY`. |
+| Blynk cloud: Connected / Offline | The controller's own connection to the Blynk server, as reported by the controller. |
 
 It starts together with the logger when you run `docker compose up -d`. To configure it, add these lines to the `.env` file next to `docker-compose.yml`:
 
 ```sh
-BLYNK_TOKEN=your-device-auth-token      # same as BLYNK_AUTH_TOKEN in secrets.h
-BLYNK_SERVER=blynk.cloud                # or your regional server, e.g. sgp1.blynk.cloud
+DEVICE_IP=192.168.1.50                  # the controller's address
+DEVICE_KEY=same-as-LOCAL_CONTROL_KEY    # from secrets.h
 WEB_USER=admin
 WEB_PASSWORD=choose-a-strong-password
 RELAY_NAMES=Gate,Garage,Door 3,Door 4,Lights,Fan,Pump,Heater   # optional
 WEB_PORT=8080                           # optional, host port
 ```
 
-Then open `http://<nas-ip>:8080`.
+Then open `http://<nas-ip>:8080`. Without `DEVICE_IP` the page shows the logs only.
 
-> The page can open the gate and the garage. Always set `WEB_USER` and `WEB_PASSWORD` when `BLYNK_TOKEN` is set. The login runs over plain HTTP, so it is only suitable on a trusted LAN. For access from outside, use a VPN (e.g. WireGuard or Tailscale) or a reverse proxy with HTTPS. Don't forward the port directly.
+> The page can open the gate and the garage. Always set `WEB_USER` and `WEB_PASSWORD`. The login and the LAN commands are not encrypted, so this is only suitable on a trusted LAN. For access from outside, use a VPN (e.g. WireGuard or Tailscale) or a reverse proxy with HTTPS. Don't forward the port directly.
 
 To run it without Docker:
 
 ```sh
-LOG_DIR=/volume1/homeauto-logs BLYNK_TOKEN=... WEB_USER=admin WEB_PASSWORD=... python3 web_app.py
+LOG_DIR=/volume1/homeauto-logs DEVICE_IP=192.168.1.50 DEVICE_KEY=... WEB_USER=admin WEB_PASSWORD=... python3 web_app.py
 ```

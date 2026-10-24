@@ -77,5 +77,6 @@ input:focus, select:focus { border-color: var(--red); }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
 .dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
 .dot.bad { background: var(--warn); }
+.dot.down { background: var(--red-hi); box-shadow: 0 0 8px var(--red); }
 .error { color: var(--red-hi); }
 [hidden] { display: none !important; }
