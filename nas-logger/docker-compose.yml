@@ -1,11 +1,14 @@
-# Home automation event logger
+# Home automation event logger + web app
 #
 #   cd nas-logger
+#   cp .env.example .env     # then edit .env
 #   docker compose up -d
 #
+# Settings come from the .env file next to this one; Compose reads it
+# automatically and fills in the ${...} values below. See .env.example.
+#
 # Daily log files go to ./logs next to this file. To store them elsewhere,
-# set LOG_PATH, e.g. in a .env file next to this one:
-#   LOG_PATH=/volume1/homeauto-logs
+# set LOG_PATH in .env, e.g. LOG_PATH=/volume1/homeauto-logs
 
 services:
   homeauto-logger:
@@ -26,7 +29,7 @@ services:
   # Web app: dashboard + log browser on http://<nas>:8080
   # Relay control needs DEVICE_IP and DEVICE_KEY (= LOCAL_CONTROL_KEY in
   # secrets.h); protect it with a login (WEB_USER / WEB_PASSWORD).
-  # Set these in the .env file next to this one.
+  # Set these in .env.
   homeauto-web:
     image: python:3.12-alpine
     container_name: homeauto-web

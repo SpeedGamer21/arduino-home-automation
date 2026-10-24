@@ -114,7 +114,7 @@ Connection status on the dashboard:
 | Local network: Unreachable | No answer after 3 tries. The controller is off or disconnected, `DEVICE_IP` is wrong, or `DEVICE_KEY` doesn't match `LOCAL_CONTROL_KEY`. |
 | Blynk cloud: Connected / Offline | The controller's own connection to the Blynk server, as reported by the controller. |
 
-It starts together with the logger when you run `docker compose up -d`. To configure it, add these lines to the `.env` file next to `docker-compose.yml`:
+It starts together with the logger when you run `docker compose up -d`. To configure it, copy `nas-logger/.env.example` to `nas-logger/.env` (next to `docker-compose.yml`, git-ignored) and fill it in. Compose reads `.env` automatically. The main settings are:
 
 ```sh
 DEVICE_IP=192.168.1.50                  # the controller's address
