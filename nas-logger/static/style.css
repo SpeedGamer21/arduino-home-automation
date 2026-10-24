@@ -1,0 +1,81 @@
+/* Black Edition theme: gloss black, carbon fibre, racing red */
+:root {
+  color-scheme: dark;
+  --bg: #070708;
+  --surface: #111114;
+  --surface-2: #18181c;
+  --border: #25252b;
+  --border-hi: #34343c;
+  --text: #f3f3f5;
+  --muted: #8a8a94;
+  --red: #e4002b;
+  --red-hi: #ff2a4f;
+  --red-glow: rgba(228, 0, 43, 0.38);
+  --ok: #35d07f;
+  --warn: #f5b301;
+  --relay: #ff2a4f;
+  --network: #f5b301;
+  --system: #c9c9d1;
+  --cut: 10px;  /* angled corner size */
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  margin: 0; min-height: 100vh; color: var(--text);
+  font: 15px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  background:
+    radial-gradient(1000px 420px at 50% -120px, rgba(228, 0, 43, 0.16), transparent 70%),
+    var(--bg);
+  border-top: 3px solid var(--red);
+}
+
+/* Carbon fibre weave */
+.carbon {
+  background:
+    linear-gradient(27deg, #131315 5px, transparent 5px) 0 5px,
+    linear-gradient(207deg, #131315 5px, transparent 5px) 10px 0,
+    linear-gradient(27deg, #1d1d20 5px, transparent 5px) 0 10px,
+    linear-gradient(207deg, #1d1d20 5px, transparent 5px) 10px 5px,
+    linear-gradient(90deg, #17171a 10px, transparent 10px),
+    linear-gradient(#19191c 25%, #161618 25%, #161618 50%, transparent 50%, transparent 75%, #1f1f22 75%, #1f1f22);
+  background-color: #121214;
+  background-size: 20px 20px;
+}
+
+/* Brand mark */
+.badge {
+  display: inline-grid; place-items: center; flex: none;
+  width: 46px; height: 32px; background: var(--red); color: #fff;
+  font-weight: 900; font-style: italic; font-size: 17px; letter-spacing: 0.5px;
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  box-shadow: 0 0 24px var(--red-glow);
+}
+.title { margin: 0; font-size: 22px; font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: 1.5px; line-height: 1.1; }
+.title em { color: var(--red); font-style: inherit; }
+.subtitle { color: var(--muted); font-size: 12px; letter-spacing: 2px; text-transform: uppercase; margin-top: 3px; }
+
+/* Buttons */
+.btn {
+  display: inline-block; border: 1px solid var(--border-hi); background: var(--surface-2); color: var(--text);
+  padding: 9px 18px; font: inherit; font-weight: 700; font-style: italic; letter-spacing: 1px; text-transform: uppercase;
+  font-size: 13px; cursor: pointer; text-decoration: none; text-align: center; white-space: nowrap;
+  clip-path: polygon(var(--cut) 0, 100% 0, calc(100% - var(--cut)) 100%, 0 100%);
+  transition: background .15s, color .15s, box-shadow .15s;
+}
+.btn:hover { background: #222228; }
+.btn.primary { background: linear-gradient(180deg, var(--red-hi), var(--red)); border-color: var(--red); color: #fff; }
+.btn.primary:hover { background: var(--red-hi); }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .4; cursor: not-allowed; pointer-events: none; }
+.btn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--red-hi); outline-offset: 2px; }
+
+input, select {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border-hi); border-radius: 0;
+  padding: 9px 12px; font: inherit; min-width: 0;
+}
+input:focus, select:focus { border-color: var(--red); }
+
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.dot.bad { background: var(--warn); }
+.error { color: var(--red-hi); }
+[hidden] { display: none !important; }

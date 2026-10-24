@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Home Automation</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; place-items: center; padding: 24px 16px; }
+  .weave { position: fixed; inset: 0; opacity: .6;
+           -webkit-mask-image: radial-gradient(ellipse at center, #000 15%, transparent 70%);
+           mask-image: radial-gradient(ellipse at center, #000 15%, transparent 70%); }
+  .panel { width: 100%; max-width: 380px; background: linear-gradient(165deg, #17171b, #0e0e10 65%);
+           border: 1px solid var(--border-hi); position: relative; z-index: 1; padding: 32px 28px 28px;
+           box-shadow: 0 30px 80px -30px rgba(0,0,0,.9), 0 0 60px -30px var(--red-glow); }
+  .panel::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+                   background: linear-gradient(90deg, var(--red), var(--red-hi) 60%, transparent); }
+  .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
+  label { display: block; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+  input { width: 100%; margin-bottom: 16px; padding: 11px 12px; background: #0b0b0d; }
+  .btn { width: 100%; padding: 12px 18px; font-size: 14px; margin-top: 6px; }
+  .msg { background: rgba(228,0,43,.1); border-left: 3px solid var(--red); padding: 9px 12px; font-size: 14px; margin: -8px 0 18px; }
+  .foot { margin-top: 22px; text-align: center; color: var(--muted); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }
+</style>
+</head>
+<body>
+  <div class="weave carbon"></div>
+  <form class="panel" method="post" action="login">
+    <div class="brand">
+      <span class="badge">HA</span>
+      <div>
+        <h1 class="title">Home <em>Automation</em></h1>
+        <div class="subtitle">Sign in to continue</div>
+      </div>
+    </div>
+    <div class="msg error" id="msg" hidden>Wrong username or password.</div>
+    <label for="user">Username</label>
+    <input id="user" name="user" autocomplete="username" required autofocus>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button class="btn primary" type="submit">Sign in</button>
+    <div class="foot">Mega 2560 · 8-channel controller</div>
+  </form>
+<script>
+  if (new URLSearchParams(location.search).has("error")) document.getElementById("msg").hidden = false;
+</script>
+</body>
+</html>

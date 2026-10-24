@@ -4,93 +4,113 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Home Automation</title>
+<link rel="stylesheet" href="style.css">
 <style>
-  :root {
-    --bg: #f4f5f7; --surface: #ffffff; --surface-2: #eef0f3; --border: #dde1e6;
-    --text: #1b1f24; --muted: #5f6b7a; --accent: #2563eb; --accent-text: #ffffff;
-    --ok: #15803d; --bad: #b91c1c; --warn: #a16207;
-    --relay: #2563eb; --network: #a16207; --system: #7c3aed;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f1216; --surface: #171b21; --surface-2: #1f252d; --border: #2c333d;
-      --text: #e6e9ed; --muted: #95a1af; --accent: #3b82f6; --accent-text: #ffffff;
-      --ok: #4ade80; --bad: #f87171; --warn: #facc15;
-      --relay: #60a5fa; --network: #facc15; --system: #c4b5fd;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 16px 48px; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px 48px; }
 
-  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 20px 0 12px; }
-  header h1 { font-size: 20px; margin: 0; margin-right: auto; }
-  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px;
-          background: var(--surface); border: 1px solid var(--border); font-size: 14px; }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
-  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
-  .reading { font-variant-numeric: tabular-nums; font-weight: 600; }
+  /* Header */
+  .hero { border-bottom: 1px solid var(--border); position: relative; }
+  .hero::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+                 background: linear-gradient(90deg, transparent, var(--red) 20%, var(--red) 80%, transparent); }
+  .hero-shade { background: linear-gradient(180deg, rgba(7,7,8,.35), rgba(7,7,8,.85)); }
+  .hero .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; padding-top: 22px; padding-bottom: 22px; }
+  .brand { display: flex; align-items: center; gap: 14px; margin-right: auto; }
+  .gauges { display: flex; flex-wrap: wrap; gap: 10px; }
+  .gauge { background: rgba(17,17,20,.85); border: 1px solid var(--border-hi); padding: 8px 16px; min-width: 112px;
+           clip-path: polygon(var(--cut) 0, 100% 0, calc(100% - var(--cut)) 100%, 0 100%); }
+  .gauge .label { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+  .gauge .value { font-size: 22px; font-weight: 800; font-style: italic; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .gauge .value small { font-size: 13px; color: var(--muted); font-weight: 600; margin-left: 2px; }
+  .gauge .status { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; font-style: italic;
+                   text-transform: uppercase; letter-spacing: .5px; line-height: 1.2; margin-top: 4px; }
+  .logout { margin: 0; }
 
-  nav { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
-  nav button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted);
-               padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer; }
-  nav button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+  /* Tabs */
+  nav { display: flex; gap: 6px; margin: 22px 0 6px; }
+  nav button { background: none; border: 0; color: var(--muted); padding: 8px 18px; font: inherit; font-weight: 800;
+               font-style: italic; text-transform: uppercase; letter-spacing: 1.5px; font-size: 13px; cursor: pointer;
+               clip-path: polygon(var(--cut) 0, 100% 0, calc(100% - var(--cut)) 100%, 0 100%); }
+  nav button:hover { color: var(--text); }
+  nav button[aria-selected="true"] { color: #fff; background: var(--red); }
 
-  h2 { font-size: 15px; margin: 24px 0 10px; color: var(--muted); font-weight: 600; }
+  h2 { display: flex; align-items: center; gap: 12px; font-size: 13px; margin: 26px 0 12px; color: var(--text);
+       font-weight: 800; font-style: italic; text-transform: uppercase; letter-spacing: 2px; }
+  h2::before { content: ""; width: 4px; height: 16px; background: var(--red); transform: skewX(-15deg); }
+  h2::after { content: ""; flex: 1; height: 1px; background: var(--border); }
   .note { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
-  .error { color: var(--bad); }
 
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px;
-          display: flex; flex-direction: column; gap: 10px; }
-  .card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-  .card .name { font-weight: 600; }
-  .card .kind { color: var(--muted); font-size: 13px; }
-  .state { font-size: 13px; font-weight: 600; color: var(--muted); }
-  .state.on { color: var(--ok); }
+  /* Relay cards */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .card { position: relative; background: linear-gradient(160deg, var(--surface-2), var(--surface) 60%);
+          border: 1px solid var(--border); padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px;
+          overflow: hidden; transition: border-color .2s, box-shadow .2s; }
+  .card::before { content: ""; position: absolute; top: 0; left: 0; width: 42px; height: 3px; background: var(--border-hi); }
+  .card:hover { border-color: var(--border-hi); }
+  .card.on { border-color: rgba(228,0,43,.6); box-shadow: 0 0 0 1px rgba(228,0,43,.25), 0 8px 30px -10px var(--red-glow); }
+  .card.on::before, .card.momentary::before { background: var(--red); }
+  .card .num { position: absolute; right: 12px; top: 4px; font-size: 40px; font-weight: 900; font-style: italic;
+               color: rgba(255,255,255,.04); line-height: 1; pointer-events: none; }
+  .card .name { font-weight: 700; font-size: 16px; }
+  .card .kind { color: var(--muted); font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 2px; }
+  .card .row2 { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .led { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 800; font-style: italic; letter-spacing: 1px; color: var(--muted); }
+  .led::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: #2c2c33; box-shadow: inset 0 1px 2px rgba(0,0,0,.6); }
+  .led.on { color: var(--red-hi); }
+  .led.on::before { background: var(--red-hi); box-shadow: 0 0 10px var(--red), 0 0 2px #fff inset; }
+  .card .btn { flex: 1; }
+  .card .row2 .btn { flex: 0 0 auto; min-width: 116px; }
 
-  button.btn, a.btn { background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
-          border-radius: 8px; padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer;
-          text-decoration: none; text-align: center; white-space: nowrap; }
-  button.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-  button.btn:disabled, a.btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; pointer-events: none; }
-
+  /* Logs */
   .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-  .toolbar input, .toolbar select { background: var(--surface); color: var(--text); border: 1px solid var(--border);
-          border-radius: 8px; padding: 8px 10px; font: inherit; min-width: 0; }
-  .toolbar input[type="search"] { flex: 1 1 200px; }
+  .toolbar input[type="search"] { flex: 1 1 220px; }
   .toolbar .spacer { flex: 1 0 0; }
-
-  .log { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-  .log .day { padding: 8px 14px; background: var(--surface-2); font-size: 13px; font-weight: 600; color: var(--muted);
-              border-top: 1px solid var(--border); }
+  .count { color: var(--muted); font-size: 13px; letter-spacing: 1px; text-transform: uppercase; align-self: center; }
+  .log { background: var(--surface); border: 1px solid var(--border); }
+  .log .day { padding: 8px 16px; background: #0c0c0e; font-size: 12px; font-weight: 800; font-style: italic; color: var(--muted);
+              text-transform: uppercase; letter-spacing: 1.5px; border-top: 1px solid var(--border); border-left: 3px solid var(--red); }
   .log .day:first-child { border-top: 0; }
-  .log .row { display: flex; gap: 12px; padding: 8px 14px; border-top: 1px solid var(--border); align-items: baseline; }
+  .log .row { display: flex; gap: 14px; padding: 9px 16px; border-top: 1px solid #1c1c21; align-items: baseline; }
+  .log .row:hover { background: var(--surface-2); }
   .log .day + .row { border-top: 0; }
-  .log .time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; flex: none; }
+  .log .time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; flex: none; font-family: ui-monospace, Consolas, monospace; }
   .log .text { overflow-wrap: anywhere; }
   .log .row .dot { align-self: center; }
-  .dot.relay { background: var(--relay); } .dot.network { background: var(--network); } .dot.system { background: var(--system); }
-  .log .empty { padding: 20px 14px; color: var(--muted); }
-  .more { display: flex; justify-content: center; margin-top: 12px; }
-  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+  .dot.relay { background: var(--relay); box-shadow: 0 0 6px var(--red); }
+  .dot.network { background: var(--network); } .dot.system { background: var(--system); }
+  .log .empty { padding: 20px 16px; color: var(--muted); }
+  .more { display: flex; justify-content: center; margin-top: 14px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--muted); margin: 12px 0 0; letter-spacing: 1px; text-transform: uppercase; }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
-  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>Home Automation</h1>
-    <span class="pill"><span id="statusDot" class="dot"></span><span id="statusText">Loading…</span></span>
-    <span class="pill">Temp <span id="temp" class="reading">--</span></span>
-    <span class="pill">Humidity <span id="hum" class="reading">--</span></span>
-  </header>
+<header class="hero carbon">
+  <div class="hero-shade">
+    <div class="wrap">
+      <div class="brand">
+        <span class="badge">HA</span>
+        <div>
+          <h1 class="title">Home <em>Automation</em></h1>
+          <div class="subtitle">Mega 2560 · 8-channel controller</div>
+        </div>
+      </div>
+      <div class="gauges">
+        <div class="gauge"><div class="label">Controller</div>
+          <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Loading</span></div></div>
+        <div class="gauge"><div class="label">Temperature</div><div class="value" id="temp">--</div></div>
+        <div class="gauge"><div class="label">Humidity</div><div class="value" id="hum">--</div></div>
+      </div>
+      <form class="logout" method="post" action="logout" id="logout" hidden>
+        <button class="btn" type="submit">Log out</button>
+      </form>
+    </div>
+  </div>
+</header>
 
+<div class="wrap">
   <nav role="tablist">
-    <button role="tab" id="tabDash" aria-selected="true" data-panel="dash">Dashboard</button>
-    <button role="tab" id="tabLogs" aria-selected="false" data-panel="logs">Logs</button>
+    <button role="tab" aria-selected="true" data-panel="dash">Dashboard</button>
+    <button role="tab" aria-selected="false" data-panel="logs">Logs</button>
   </nav>
 
   <section id="dash">
@@ -104,6 +124,7 @@
   </section>
 
   <section id="logs" hidden>
+    <h2>Event log</h2>
     <div class="toolbar">
       <select id="day" aria-label="Day"><option value="">All days</option></select>
       <select id="kind" aria-label="Event type">
@@ -115,10 +136,10 @@
       <input id="q" type="search" placeholder="Search, e.g. Relay 5 or IR remote" aria-label="Search">
     </div>
     <div class="toolbar">
-      <span id="count" class="note" style="margin:0;align-self:center"></span>
+      <span id="count" class="count"></span>
       <span class="spacer"></span>
       <a class="btn" id="dlDay" aria-disabled="true">Download day (.txt)</a>
-      <a class="btn" href="api/logs.zip">Download all (.zip)</a>
+      <a class="btn primary" href="api/logs.zip">Download all (.zip)</a>
     </div>
     <div id="entries" class="log"></div>
     <div class="more"><button class="btn" id="more" hidden>Load more</button></div>
@@ -136,6 +157,10 @@ const PAGE = 200;
 
 async function api(path, options) {
   const r = await fetch(path, options);
+  if (r.status === 401) {  // session expired or server restarted
+    location.href = "login";
+    throw new Error("Not logged in");
+  }
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.error || r.statusText);
   return body;
@@ -169,8 +194,7 @@ $("#viewAll").onclick = () => showTab("logs");
 // ---------- Log rendering ----------
 function renderEntries(container, entries, append) {
   if (!append) container.replaceChildren();
-  let lastDay = container.dataset.lastDay || "";
-  if (!append) lastDay = "";
+  let lastDay = append ? container.dataset.lastDay || "" : "";
   for (const e of entries) {
     const [day, time] = e.time.split(" ");
     if (day !== lastDay) {
@@ -197,12 +221,19 @@ async function loadStatus() {
   renderStatus();
 }
 
+function setReading(id, value, unit) {
+  const e = $(id);
+  e.replaceChildren(value);
+  if (value !== "--") e.append(el("small", null, unit));
+}
+
 function renderStatus() {
   const s = status;
   const dot = $("#statusDot"), text = $("#statusText"), note = $("#relayNote");
   dot.className = "dot";
   note.hidden = true;
   note.classList.remove("error");
+  if (s.login) $("#logout").hidden = false;
 
   if (!s.blynk) {
     text.textContent = "Logs only";
@@ -210,20 +241,20 @@ function renderStatus() {
     note.hidden = false;
   } else if (s.error) {
     dot.classList.add("bad");
-    text.textContent = "Blynk unreachable";
+    text.textContent = "No Blynk";
     note.textContent = s.error;
     note.classList.add("error");
     note.hidden = false;
   } else {
     dot.classList.add(s.online ? "ok" : "bad");
-    text.textContent = s.online ? "Controller online" : "Controller offline";
+    text.textContent = s.online ? "Online" : "Offline";
     if (!s.online) {
       note.textContent = "The controller is offline, so relays can only be switched locally. States shown are the last known.";
       note.hidden = false;
     }
   }
-  $("#temp").textContent = s.temperature != null ? s.temperature.toFixed(1) + " °C" : "--";
-  $("#hum").textContent = s.humidity != null ? Math.round(s.humidity) + " %" : "--";
+  setReading("#temp", s.temperature != null ? s.temperature.toFixed(1) : "--", "°C");
+  setReading("#hum", s.humidity != null ? String(Math.round(s.humidity)) : "--", "%");
 
   const grid = $("#relays");
   grid.replaceChildren();
@@ -232,10 +263,11 @@ function renderStatus() {
   const canControl = s.online && !s.error;
 
   for (const r of s.relays) {
-    const card = el("div", "card");
-    const top = el("div", "top");
-    top.append(el("span", "name", r.name), el("span", "kind", r.momentary ? "Pulse 1 s" : "On / off"));
-    card.append(top);
+    const card = el("div", "card" + (r.momentary ? " momentary" : r.on ? " on" : ""));
+    card.append(el("span", "num", String(r.n).padStart(2, "0")));
+    const head = el("div");
+    head.append(el("div", "name", r.name), el("div", "kind", r.momentary ? "Momentary · 1 s pulse" : "Power · on / off"));
+    card.append(head);
 
     if (r.momentary) {
       const btn = el("button", "btn primary", "Pulse");
@@ -243,11 +275,12 @@ function renderStatus() {
       btn.onclick = () => relayAction(btn, r, {}, "Sent");
       card.append(btn);
     } else {
-      card.append(el("span", "state" + (r.on ? " on" : ""), r.on ? "ON" : "OFF"));
+      const row = el("div", "row2");
       const btn = el("button", "btn" + (r.on ? "" : " primary"), r.on ? "Turn off" : "Turn on");
       btn.disabled = !canControl;
-      btn.onclick = () => relayAction(btn, r, { on: !r.on }, r.on ? "Turned off" : "Turned on");
-      card.append(btn);
+      btn.onclick = () => relayAction(btn, r, { on: !r.on }, r.on ? "Off" : "On");
+      row.append(el("span", "led" + (r.on ? " on" : ""), r.on ? "ON" : "OFF"), btn);
+      card.append(row);
     }
     grid.append(card);
   }

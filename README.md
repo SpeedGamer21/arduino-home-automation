@@ -93,11 +93,13 @@ Example log:
 
 ## Web app
 
-![Web app dashboard](docs/screenshot.png)
+| Login | Dashboard |
+|---|---|
+| ![Web app login page](docs/login.png) | ![Web app dashboard](docs/screenshot.png) |
 
-*Dashboard with sample data.*
+*Screenshots with sample data.*
 
-`nas-logger/web_app.py` (Python 3 standard library only) serves a web page on port 8080 with two tabs:
+`nas-logger/web_app.py` (Python 3 standard library only) serves a web page on port 8080. When `WEB_USER` and `WEB_PASSWORD` are set, it asks you to sign in first and keeps you signed in for 30 days (restarting the app signs everyone out). After signing in there are two tabs:
 
 - **Dashboard.** Shows whether the controller is online, the temperature and humidity, and the 8 relays. You can pulse relays 1–4 and switch relays 5–8 on or off. It also shows the latest log entries.
 - **Logs.** Browse every logged event, either all days or one day at a time. Filter by type (relay, network, system), search the text (e.g. `IR remote` or `Relay 5`), and download a single day as `.txt` or all logs as a `.zip`.
@@ -117,7 +119,7 @@ WEB_PORT=8080                           # optional, host port
 
 Then open `http://<nas-ip>:8080`.
 
-> The page can open the gate and the garage. Always set `WEB_USER` and `WEB_PASSWORD` when `BLYNK_TOKEN` is set. Basic auth over plain HTTP is only suitable on a trusted LAN. For access from outside, use a VPN (e.g. WireGuard or Tailscale) or a reverse proxy with HTTPS. Don't forward the port directly.
+> The page can open the gate and the garage. Always set `WEB_USER` and `WEB_PASSWORD` when `BLYNK_TOKEN` is set. The login runs over plain HTTP, so it is only suitable on a trusted LAN. For access from outside, use a VPN (e.g. WireGuard or Tailscale) or a reverse proxy with HTTPS. Don't forward the port directly.
 
 To run it without Docker:
 

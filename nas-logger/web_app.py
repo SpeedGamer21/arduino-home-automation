@@ -8,21 +8,22 @@ go through the Blynk HTTP API, so the controller firmware needs no changes.
 Settings via environment variables:
   LOG_DIR       folder with the daily .txt files     (default: ./logs)
   WEB_PORT      HTTP port                            (default: 8080)
-  WEB_USER      optional HTTP basic auth; set both when BLYNK_TOKEN is set,
+  WEB_USER      login for the web page; set both when BLYNK_TOKEN is set,
   WEB_PASSWORD  since the page can open the gate / garage
   BLYNK_TOKEN   device auth token (same as in secrets.h); without it the
                 dashboard shows the logs only
   BLYNK_SERVER  Blynk server host                    (default: blynk.cloud)
   RELAY_NAMES   comma-separated names for relays 1-8 (default: Relay 1..8)
 """
-import base64
 import hmac
 import io
 import json
 import os
 import re
+import secrets
 import time
 import zipfile
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import urlopen
@@ -45,6 +46,9 @@ DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 LINE_RE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})  (.*)")
 MAX_LIMIT = 2000
 STATUS_CACHE_SECONDS = 10  # keeps Blynk API usage low with several viewers
+SESSION_SECONDS = 30 * 24 * 3600
+STATIC_FILES = {"/": "index.html", "/style.css": "style.css"}
+PUBLIC_PATHS = {"/login", "/style.css"}
 
 
 # ------------------------
@@ -178,6 +182,32 @@ def set_relay(n, body):
 
 
 # ------------------------
+# Login sessions (in memory: a restart logs everyone out)
+# ------------------------
+sessions = {}  # token -> expiry (time.time())
+
+
+def login_enabled():
+    return bool(WEB_USER and WEB_PASSWORD)
+
+
+def check_login(user, password):
+    # Compare both so a wrong username takes as long as a wrong password
+    user_ok = hmac.compare_digest(user.encode(), WEB_USER.encode())
+    password_ok = hmac.compare_digest(password.encode(), WEB_PASSWORD.encode())
+    return user_ok and password_ok
+
+
+def new_session():
+    now = time.time()
+    for token in [t for t, expiry in sessions.items() if expiry < now]:
+        del sessions[token]
+    token = secrets.token_urlsafe(32)
+    sessions[token] = now + SESSION_SECONDS
+    return token
+
+
+# ------------------------
 # HTTP
 # ------------------------
 class Handler(BaseHTTPRequestHandler):
@@ -186,17 +216,39 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # the page polls; keep the container log for real problems
 
-    def authorized(self):
-        if not (WEB_USER and WEB_PASSWORD):
+    def session_token(self):
+        try:
+            morsel = SimpleCookie(self.headers.get("Cookie", "")).get("session")
+        except CookieError:
+            return None
+        return morsel.value if morsel else None
+
+    def logged_in(self):
+        if not login_enabled():
             return True
-        expected = "Basic " + base64.b64encode(f"{WEB_USER}:{WEB_PASSWORD}".encode()).decode()
-        if hmac.compare_digest(self.headers.get("Authorization", ""), expected):
+        expiry = sessions.get(self.session_token())
+        return expiry is not None and expiry > time.time()
+
+    def authorized(self, path):
+        """True if the request may go on; otherwise sends a 401 or a redirect to the login page."""
+        if path in PUBLIC_PATHS or self.logged_in():
             return True
-        self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="Home Automation"')
+        if path.startswith("/api/"):
+            self.send_json({"error": "Not logged in"}, 401)
+        else:
+            self.redirect("login")
+        return False
+
+    def redirect(self, location, cookie=None):
+        self.send_response(303)
+        self.send_header("Location", location)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.send_header("Content-Length", "0")
         self.end_headers()
-        return False
+
+    def read_body(self):
+        return self.rfile.read(int(self.headers.get("Content-Length", 0)))
 
     def send_body(self, data, content_type, status=200, filename=None):
         self.send_response(status)
@@ -212,18 +264,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_body(json.dumps(value).encode(), "application/json", status)
 
     def do_GET(self):
-        if not self.authorized():
-            return
         url = urlparse(self.path)
         qs = {k: v[0] for k, v in parse_qs(url.query).items()}
         path = url.path
+        if not self.authorized(path):
+            return
 
         try:
-            if path == "/":
-                with open(os.path.join(STATIC_DIR, "index.html"), "rb") as f:
-                    self.send_body(f.read(), "text/html; charset=utf-8")
+            if path == "/login":
+                if self.logged_in():
+                    return self.redirect("./")
+                self.send_static("login.html")
+            elif path in STATIC_FILES:
+                self.send_static(STATIC_FILES[path])
             elif path == "/api/status":
-                self.send_json(controller_status())
+                self.send_json({**controller_status(), "login": login_enabled()})
             elif path == "/api/days":
                 self.send_json([{"day": d, "size": os.path.getsize(day_path(d))} for d in log_days()])
             elif path == "/api/entries":
@@ -237,6 +292,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Not found"}, 404)
         except BlynkError as e:
             self.send_json({"error": str(e)}, 502)
+
+    def send_static(self, name):
+        content_type = "text/css" if name.endswith(".css") else "text/html; charset=utf-8"
+        with open(os.path.join(STATIC_DIR, name), "rb") as f:
+            self.send_body(f.read(), content_type)
 
     def get_entries(self, qs):
         """?day=YYYY-MM-DD or ?from=&to=, plus optional q, kind, offset, limit."""
@@ -258,17 +318,22 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"total": len(matches), "entries": matches[offset:offset + limit]})
 
     def do_POST(self):
-        if not self.authorized():
+        path = urlparse(self.path).path
+        if path == "/login":
+            return self.post_login()
+        if path == "/logout":
+            sessions.pop(self.session_token(), None)
+            return self.redirect("login", "session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+        if not self.authorized(path):
             return
-        m = re.fullmatch(r"/api/relay/(\d+)", urlparse(self.path).path)
+        m = re.fullmatch(r"/api/relay/(\d+)", path)
         if not m:
             return self.send_json({"error": "Not found"}, 404)
         # Plain HTML forms can't send JSON, so this also blocks cross-site form posts
         if not self.headers.get("Content-Type", "").startswith("application/json"):
             return self.send_json({"error": "Expected application/json"}, 415)
         try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length) or b"{}")
+            body = json.loads(self.read_body() or b"{}")
             if not isinstance(body, dict):
                 raise ValueError
         except ValueError:
@@ -281,6 +346,16 @@ class Handler(BaseHTTPRequestHandler):
         if error:
             return self.send_json({"error": error}, 409 if error == "Controller is offline" else 400)
         self.send_json({"ok": True})
+
+    def post_login(self):
+        if not login_enabled():
+            return self.redirect("./")
+        form = {k: v[0] for k, v in parse_qs(self.read_body().decode("utf-8", "replace")).items()}
+        if not check_login(form.get("user", ""), form.get("password", "")):
+            time.sleep(1)  # slows down password guessing
+            return self.redirect("login?error=1")
+        cookie = f"session={new_session()}; Path=/; Max-Age={SESSION_SECONDS}; HttpOnly; SameSite=Lax"
+        self.redirect("./", cookie)
 
 
 def main():
