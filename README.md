@@ -90,3 +90,37 @@ Example log:
 ```
 
 > The logger protocol has no authentication. Only expose it on a trusted LAN.
+
+## Web app
+
+![Web app dashboard](docs/screenshot.png)
+
+*Dashboard with sample data.*
+
+`nas-logger/web_app.py` (Python 3 standard library only) serves a web page on port 8080 with two tabs:
+
+- **Dashboard.** Shows whether the controller is online, the temperature and humidity, and the 8 relays. You can pulse relays 1–4 and switch relays 5–8 on or off. It also shows the latest log entries.
+- **Logs.** Browse every logged event, either all days or one day at a time. Filter by type (relay, network, system), search the text (e.g. `IR remote` or `Relay 5`), and download a single day as `.txt` or all logs as a `.zip`.
+
+The page talks to the controller through the Blynk HTTP API, so the firmware does not change. Without `BLYNK_TOKEN` the page shows the logs only. While the controller is offline, relay buttons are disabled so a command can't be applied by surprise when it reconnects.
+
+It starts together with the logger when you run `docker compose up -d`. To configure it, add these lines to the `.env` file next to `docker-compose.yml`:
+
+```sh
+BLYNK_TOKEN=your-device-auth-token      # same as BLYNK_AUTH_TOKEN in secrets.h
+BLYNK_SERVER=blynk.cloud                # or your regional server, e.g. sgp1.blynk.cloud
+WEB_USER=admin
+WEB_PASSWORD=choose-a-strong-password
+RELAY_NAMES=Gate,Garage,Door 3,Door 4,Lights,Fan,Pump,Heater   # optional
+WEB_PORT=8080                           # optional, host port
+```
+
+Then open `http://<nas-ip>:8080`.
+
+> The page can open the gate and the garage. Always set `WEB_USER` and `WEB_PASSWORD` when `BLYNK_TOKEN` is set. Basic auth over plain HTTP is only suitable on a trusted LAN. For access from outside, use a VPN (e.g. WireGuard or Tailscale) or a reverse proxy with HTTPS. Don't forward the port directly.
+
+To run it without Docker:
+
+```sh
+LOG_DIR=/volume1/homeauto-logs BLYNK_TOKEN=... WEB_USER=admin WEB_PASSWORD=... python3 web_app.py
+```
