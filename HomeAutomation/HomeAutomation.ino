@@ -53,17 +53,21 @@ const int numMomentaryRelays = 4;
 const int numPowerRelays = 4;
 const int totalRelays = 8;
 
-// IR codes
+// IR codes (NEC, IRremote 4.x decodedRawData), one per relay
 const unsigned long irCodes[] = {
-  0xBA45FF00,
-  0xB946FF00,
-  0xB847FF00,
-  0xBB44FF00,
-  0xBF40FF00,
-  0xBC43FF00,
-  0xF807FF00,
-  0xEA15FF00
+  0xBF40FF00,  // relay 1 (push)
+  0xBC43FF00,  // relay 2 (push)
+  0xF807FF00,  // relay 3 (push)
+  0xEA15FF00,  // relay 4 (push)
+  0xBA45FF00,  // relay 5
+  0xB946FF00,  // relay 6
+  0xB847FF00,  // relay 7
+  0xBB44FF00   // relay 8
 };
+const unsigned long irAllPowerCode = 0xE916FF00;  // relays 5-8 all on, or all off if all are on
+const unsigned long irScreenCode = 0xE31CFF00;    // OLED sleep / wake
+// Reserved, not used yet: 0xF609FF00, 0xE619FF00, 0xF20DFF00, 0xE718FF00,
+// 0xAD52FF00, 0xF708FF00, 0xA55AFF00
 
 DHT dht(DHTPIN, DHTTYPE);
 
@@ -174,6 +178,8 @@ unsigned long lastDisplayUpdate = 0;
 const unsigned long displayInterval = 2000;
 bool displayDirty = true;
 bool lastShownOnline = false;
+bool screenOn = true;               // toggled from the IR remote
+unsigned long lastIrActionTime = 0;  // repeat guard for the all-relays / screen buttons
 
 // Sensor timing / cached readings
 unsigned long lastSensorRead = 0;
@@ -280,8 +286,25 @@ void setPowerRelayFromApp(int i, int value) {
   pendingAppUpdate[i] = false;
 }
 
-void setPowerRelayFromWeb(int relayIndex, bool on) {
-  if (on != isRelayOn(relayIndex)) togglePowerRelay(relayIndex, SRC_WEB);
+void setPowerRelay(int relayIndex, bool on, uint8_t source) {
+  if (on != isRelayOn(relayIndex)) togglePowerRelay(relayIndex, source);
+}
+
+// Push relays are left alone so this never opens the gate / garage
+void toggleAllPowerRelays(uint8_t source) {
+  bool allOn = true;
+  for (int i = numMomentaryRelays; i < totalRelays; i++) {
+    if (!isRelayOn(i)) allOn = false;
+  }
+  for (int i = numMomentaryRelays; i < totalRelays; i++) {
+    setPowerRelay(i, !allOn, source);
+  }
+}
+
+void toggleScreen() {
+  screenOn = !screenOn;
+  display.ssd1306_command(screenOn ? SSD1306_DISPLAYON : SSD1306_DISPLAYOFF);
+  if (screenOn) displayDirty = true;  // redraw with current values
 }
 
 // ------------------------
@@ -365,6 +388,20 @@ void checkIRRemote() {
           togglePowerRelay(relayIndex, SRC_IR);
         }
         return;
+      }
+    }
+
+    if (receivedCode == irAllPowerCode || receivedCode == irScreenCode) {
+      unsigned long currentMillis = millis();
+      if (currentMillis - lastIrActionTime < debounceTime) return;
+      lastIrActionTime = currentMillis;
+
+      if (receivedCode == irAllPowerCode) {
+        Serial.println(F("IR toggled all power relays"));
+        toggleAllPowerRelays(SRC_IR);
+      } else {
+        Serial.println(F("IR toggled screen"));
+        toggleScreen();
       }
     }
   }
@@ -513,7 +550,7 @@ void handleControl(char *msg) {
   if (*cmd == 'P' && relay >= 1 && relay <= numMomentaryRelays) {
     if (isNew) triggerMomentaryRelay(relay - 1, SRC_WEB);
   } else if (*cmd == 'W' && relay > numMomentaryRelays && relay <= totalRelays && valueText) {
-    if (isNew) setPowerRelayFromWeb(relay - 1, atoi(valueText) != 0);
+    if (isNew) setPowerRelay(relay - 1, atoi(valueText) != 0, SRC_WEB);
   } else if (*cmd != 'S') {
     ok = false;
   }
@@ -746,7 +783,7 @@ void loop() {
   }
 
   // Non-blocking display refresh, only when something changed
-  if (displayDirty && millis() - lastDisplayUpdate >= displayInterval) {
+  if (screenOn && displayDirty && millis() - lastDisplayUpdate >= displayInterval) {
     lastDisplayUpdate = millis();
     displayDirty = false;
     lcdText();

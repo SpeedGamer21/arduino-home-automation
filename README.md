@@ -43,7 +43,17 @@ An Arduino Mega controller for 8 relays. You can switch them from wall switches,
    - `USE_STATIC_IP 1` (recommended): set `staticIP`, `dnsIP`, `gatewayIP` and `subnetMask`. Use an address outside your router's DHCP pool. Re-initialising Ethernet never blocks in this mode.
    - `USE_STATIC_IP 0`: use DHCP. Re-initialising Ethernet can block for up to 10 s (`dhcpTimeout`) while the router itself is down. If you use the web app, reserve the controller's address in your router so it doesn't change.
 4. Set `nasIP` to your NAS's address if you use the logger.
-5. If your remote is different, replace the codes in `irCodes[]`. Entries 0–7 map to relays 1–8.
+5. If your remote is different, replace the codes in `irCodes[]` (entries 0–7 map to relays 1–8), `irAllPowerCode` and `irScreenCode`. See the table below.
+
+### IR remote
+
+| Code | Action |
+|---|---|
+| `0xBA45FF00`, `0xB946FF00`, `0xB847FF00`, `0xBB44FF00` | Toggle relays 5, 6, 7, 8 |
+| `0xBF40FF00`, `0xBC43FF00`, `0xF807FF00`, `0xEA15FF00` | Pulse push relays 1, 2, 3, 4 |
+| `0xE916FF00` | Relays 5–8 all on, or all off if they're all on already. Push relays 1–4 are never triggered. |
+| `0xE31CFF00` | Put the OLED screen to sleep, or wake it |
+| `0xF609FF00`, `0xE619FF00`, `0xF20DFF00`, `0xE718FF00`, `0xAD52FF00`, `0xF708FF00`, `0xA55AFF00` | Reserved, no action yet |
 
 ### Blynk virtual pins
 
